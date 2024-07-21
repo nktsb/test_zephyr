@@ -21,6 +21,8 @@ static const char *toggle_cmd_preamble = "toggle";
 static const char *quantity_cmd_preamble = "quantity ";
 static const char *period_cmd_preamble = "period ";
 
+static const char *sensor_pckt_preamble = "SENS";
+
 typedef enum {
     CMD_UNDEF,      // NO_CMD
     CMD_READ,       // read sensors data "read\n"
@@ -83,19 +85,19 @@ void interface_parse_task(void)
 
         if(rx_byte == CMD_LAST_SYMBOL)
         {
-            if(strcmp(cmd_parser.buffer, read_cmd_preamble) == 0)
+            if(strncmp(cmd_parser.buffer, read_cmd_preamble, strlen(read_cmd_preamble)) == 0)
             {
                 cmd_parser.cmd = CMD_READ;
                 cmd_parser.new_cmd_flg = true;
             }
             else
-            if(strcmp(cmd_parser.buffer, toggle_cmd_preamble) == 0)
+            if(strncmp(cmd_parser.buffer, toggle_cmd_preamble, strlen(toggle_cmd_preamble)) == 0)
             {
                 cmd_parser.cmd = CMD_TOGGLE;
                 cmd_parser.new_cmd_flg = true;
             }
             else
-            if(memcmp(cmd_parser.buffer, quantity_cmd_preamble, strlen(quantity_cmd_preamble)) == 0)
+            if(strncmp(cmd_parser.buffer, quantity_cmd_preamble, strlen(quantity_cmd_preamble)) == 0)
             {
                 cmd_parser.cmd_args = &cmd_parser.buffer[strlen(quantity_cmd_preamble)];
 
@@ -103,7 +105,7 @@ void interface_parse_task(void)
                 cmd_parser.new_cmd_flg = true;
             }
             else
-            if(memcmp(cmd_parser.buffer, period_cmd_preamble, strlen(period_cmd_preamble)) == 0)
+            if(strncmp(cmd_parser.buffer, period_cmd_preamble, strlen(period_cmd_preamble)) == 0)
             {
                 cmd_parser.cmd_args = &cmd_parser.buffer[strlen(period_cmd_preamble)];
 
@@ -116,18 +118,25 @@ void interface_parse_task(void)
                 interface_reset_parser();
             }
         }
-        else
+        else if(cmd_parser.counter < sizeof(cmd_parser.buffer) - 1)
+        {
             cmd_parser.buffer[cmd_parser.counter++] = rx_byte;
+        }
+        else
+        {
+            printk("Command buffer overflow!\r\n");
+            interface_reset_parser();
+        }
 
     }
     k_spin_unlock(&rx_buffer_spinlock, key);
-
 }
 
 void interface_cmd_apply_task(void)
 {
     if(cmd_parser.new_cmd_flg)
     {
+        char *endptr = NULL;
         switch(cmd_parser.cmd)
         {
             case CMD_READ:
@@ -137,18 +146,21 @@ void interface_cmd_apply_task(void)
                 printk("Data format toggled\r\n");
                 break;
             case CMD_QUANTITY:
-                uint16_t qty = atoi(cmd_parser.cmd_args);
+                uint16_t qty = strtol(cmd_parser.cmd_args, &endptr, 10);
                 sensors_change_quantity(qty);
                 break;
             case CMD_PERIOD:
-                uint16_t sensor = atoi(cmd_parser.cmd_args);
+                uint16_t sensor = strtoul(cmd_parser.cmd_args, &endptr, 10);
 
-                do { cmd_parser.cmd_args++; }
-                while (*cmd_parser.cmd_args != ' ' && *cmd_parser.cmd_args != '\0');
+                if (*endptr == ' ')
+                {
+                    cmd_parser.cmd_args = endptr + 1;
+                    uint16_t period = strtoul(cmd_parser.cmd_args, NULL, 10);
+                    sensors_change_period((uint16_t)sensor, (uint16_t)period);
+                }
+                else
+                    printk("Invalid period\r\n");
 
-                uint16_t period = atoi(cmd_parser.cmd_args);
-                
-                sensors_change_period(sensor, period);
                 break;
             default:
                 break;
@@ -160,7 +172,7 @@ void interface_cmd_apply_task(void)
 
 void interface_init(void)
 {
-    if (!uart_dev) {
+    if (!device_is_ready(uart_dev)) {
         printk("Cannot find UART device!\n");
         return;
     }
