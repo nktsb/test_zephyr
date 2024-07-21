@@ -1,10 +1,9 @@
 #include "interface.h"
 #include <zephyr/drivers/uart.h>
+#include <zephyr/sys/ring_buffer.h>
 #include <zephyr/devicetree.h>
 #include <zephyr/sys/printk.h>
 #include <zephyr/spinlock.h>
-
-#include "ring_buffer.h"
 
 #define RX_BUFFER_SIZE     512
 #define CMD_LAST_SYMBOL    '\n'
@@ -12,7 +11,8 @@
 static const struct device *uart_dev = DEVICE_DT_GET(DT_NODELABEL(usart2));
 
 struct k_spinlock rx_buffer_spinlock;
-static ring_buffer_st *uart_rx_buffer = NULL;
+static struct ring_buf uart_rx_buffer = {0};
+static uint8_t uart_rx_buffer_data[RX_BUFFER_SIZE] = {0};
 
 static const char *read_cmd_preamble = "read";
 static const char *toggle_cmd_preamble = "toggle";
@@ -56,7 +56,7 @@ static void uart_cb(const struct device *dev, void *user_data)
     uart_fifo_read(uart_dev, &rx_byte, 1);
 
     k_spinlock_key_t key = k_spin_lock(&rx_buffer_spinlock);
-    ringBufferPutSymbol(uart_rx_buffer, &rx_byte);
+    ring_buf_put(&uart_rx_buffer, &rx_byte, 1);
     k_spin_unlock(&rx_buffer_spinlock, key);
 
     // printk("Uart callback!\r\n");
@@ -74,10 +74,10 @@ static void interface_reset_parser(void)
 void interface_parse_task(void)
 {
     k_spinlock_key_t key = k_spin_lock(&rx_buffer_spinlock);
-    if(ringBufferGetAvail(uart_rx_buffer) && !cmd_parser.new_cmd_flg)
+    if(!ring_buf_is_empty(&uart_rx_buffer) && !cmd_parser.new_cmd_flg)
     {
         uint8_t rx_byte = 0;
-        ringBufferGetSymbol(uart_rx_buffer, &rx_byte);
+        ring_buf_get(&uart_rx_buffer, &rx_byte, 1);
 
         if(rx_byte == CMD_LAST_SYMBOL)
         {
@@ -167,5 +167,5 @@ void interface_init(void)
     uart_irq_callback_set(uart_dev, uart_cb);
     uart_irq_rx_enable(uart_dev);
 
-    uart_rx_buffer = ringBufferInit(sizeof(uint8_t), RX_BUFFER_SIZE);
+    ring_buf_init(&uart_rx_buffer, RX_BUFFER_SIZE, uart_rx_buffer_data);
 }

@@ -7,5 +7,4 @@ project(test_zephyr)
 target_sources(app PRIVATE  src/main.c
                             src/interface.c
                             src/temperature.c
-                            src/ring_buffer.c
 )
