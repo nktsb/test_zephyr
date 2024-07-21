@@ -2,6 +2,7 @@
 #include <zephyr/drivers/uart.h>
 #include <zephyr/devicetree.h>
 #include <zephyr/sys/printk.h>
+#include <zephyr/spinlock.h>
 
 #include "ring_buffer.h"
 
@@ -9,25 +10,29 @@
 #define CMD_LAST_SYMBOL    '\n'
 
 static const struct device *uart_dev = DEVICE_DT_GET(DT_NODELABEL(usart2));
+
+struct k_spinlock rx_buffer_spinlock;
 static ring_buffer_st *uart_rx_buffer = NULL;
 
 static const char *read_cmd_preamble = "read";
 static const char *toggle_cmd_preamble = "toggle";
-static const char *number_cmd_preamble = "number ";
+static const char *quantity_cmd_preamble = "quantity ";
+static const char *period_cmd_preamble = "period ";
 
 typedef enum {
-    CMD_UNDEF,  // NO_CMD
-    CMD_READ,   // read sensors data
-    CMD_TOGGLE, // switch data type
-    CMD_NUMBER  // change sensors number (up to 256)
+    CMD_UNDEF,      // NO_CMD
+    CMD_READ,       // read sensors data "read\n"
+    CMD_TOGGLE,     // switch data type "toggle\n"
+    CMD_QUANTITY,   // change sensors quantity (up to 256) "quantity <q>\n", q - quantity
+    CMD_PERIOD      // update sensor's period  "period <n> <p>\n" n - sensor, p - period
 } cmd_t;
 
 typedef struct command_parser {
 
     char buffer[16];
+    char *cmd_args;
     uint8_t counter;
     cmd_t cmd;
-    int cmd_arg;
     
     bool new_cmd_flg;
 
@@ -37,6 +42,7 @@ static command_parser_st cmd_parser = {
     .buffer = {0},
     .counter = 0,
     .cmd = CMD_UNDEF,
+    .cmd_args = cmd_parser.buffer,
     .new_cmd_flg = false
 };
 
@@ -48,13 +54,26 @@ static void uart_cb(const struct device *dev, void *user_data)
     uint8_t rx_byte = 0;
 
     uart_fifo_read(uart_dev, &rx_byte, 1);
+
+    k_spinlock_key_t key = k_spin_lock(&rx_buffer_spinlock);
     ringBufferPutSymbol(uart_rx_buffer, &rx_byte);
+    k_spin_unlock(&rx_buffer_spinlock, key);
 
     // printk("Uart callback!\r\n");
 }
 
+static void interface_reset_parser(void)
+{
+    memset((void*)cmd_parser.buffer, 0, sizeof(cmd_parser.buffer));
+    cmd_parser.cmd_args = cmd_parser.buffer;
+    cmd_parser.cmd = CMD_UNDEF;
+    cmd_parser.new_cmd_flg = false;
+    cmd_parser.counter = 0;
+}
+
 void interface_parse_task(void)
 {
+    k_spinlock_key_t key = k_spin_lock(&rx_buffer_spinlock);
     if(ringBufferGetAvail(uart_rx_buffer) && !cmd_parser.new_cmd_flg)
     {
         uint8_t rx_byte = 0;
@@ -74,26 +93,32 @@ void interface_parse_task(void)
                 cmd_parser.new_cmd_flg = true;
             }
             else
-            if(memcmp(cmd_parser.buffer, number_cmd_preamble, strlen(number_cmd_preamble)) == 0)
+            if(memcmp(cmd_parser.buffer, quantity_cmd_preamble, strlen(quantity_cmd_preamble)) == 0)
             {
-                cmd_parser.cmd_arg = atoi(&cmd_parser.buffer[strlen(number_cmd_preamble)]);
+                cmd_parser.cmd_args = &cmd_parser.buffer[strlen(quantity_cmd_preamble)];
 
-                cmd_parser.cmd = CMD_NUMBER;
+                cmd_parser.cmd = CMD_QUANTITY;
+                cmd_parser.new_cmd_flg = true;
+            }
+            else
+            if(memcmp(cmd_parser.buffer, period_cmd_preamble, strlen(period_cmd_preamble)) == 0)
+            {
+                cmd_parser.cmd_args = &cmd_parser.buffer[strlen(period_cmd_preamble)];
+
+                cmd_parser.cmd = CMD_PERIOD;
                 cmd_parser.new_cmd_flg = true;
             }
             else
             {
-                cmd_parser.cmd = CMD_UNDEF;
-                cmd_parser.new_cmd_flg = false;
+                printk("Wrong cmd\r\n");
+                interface_reset_parser();
             }
-
-            memset((void*)cmd_parser.buffer, 0, sizeof(cmd_parser.buffer));
-            cmd_parser.counter = 0;
         }
         else
             cmd_parser.buffer[cmd_parser.counter++] = rx_byte;
 
     }
+    k_spin_unlock(&rx_buffer_spinlock, key);
 
 }
 
@@ -109,17 +134,26 @@ void interface_cmd_apply_task(void)
             case CMD_TOGGLE:
                 printk("Data format toggled\r\n");
                 break;
-            case CMD_NUMBER:
-                int number = cmd_parser.cmd_arg;
-                printk("Changed sensor number to %d\r\n", number);
+            case CMD_QUANTITY:
+                uint16_t qty = atoi(cmd_parser.cmd_args);
+                printk("Changed sensor qty to %d\r\n", qty);
+                break;
+            case CMD_PERIOD:
+
+                uint16_t sensor = atoi(cmd_parser.cmd_args);
+
+                do { cmd_parser.cmd_args++; }
+                while (*cmd_parser.cmd_args != ' ' && *cmd_parser.cmd_args != '\0');
+                
+                uint16_t period = atoi(cmd_parser.cmd_args);
+
+                printk("Changed sensor %d period to %d\r\n", sensor, period);
                 break;
             default:
                 break;
         }
 
-        cmd_parser.new_cmd_flg = false;
-        cmd_parser.cmd = CMD_UNDEF;
-        cmd_parser.cmd_arg = 0;
+        interface_reset_parser();
     }
 }
 

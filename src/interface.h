@@ -2,6 +2,7 @@
 #define __INTERFACE_H_
 
 #include <stdint.h>
+#include <stdlib.h>
 #include <stdbool.h>
 
 void interface_init(void);
