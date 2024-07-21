@@ -1,0 +1,41 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "🛠 Build App",
+			"group": "build",
+			"type": "shell",
+			"command": "west",
+			"args": [   
+						"build",
+						"-b", 
+						"${config:board}",
+						"--build-dir", 
+						"${config:build_dir}",
+					]
+		},
+        {
+            "label": "🗑 Clean all",
+            "group": "build",
+            "type": "shell",
+            "command": "rm",
+            "args": [
+                        "-r",
+                        "${config:build_dir}"
+                    ]
+        },
+        {
+            "label": "📘 🔵 ST App flash",
+            "group": "build",
+            "type": "shell",
+            "command": "west",
+            "dependsOrder": "sequence",
+            "dependsOn": ["🛠 Build App"],
+            "args": [
+						"flash",
+						"--build-dir", 
+						"${config:build_dir}",
+                    ]
+        },
+	]
+}

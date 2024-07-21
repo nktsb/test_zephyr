@@ -1,0 +1,28 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "📘 STlink launch",
+            "device": "stm32f103rb",
+            "cwd": "${workspaceFolder}",
+            "executable": "${config:build_dir}/zephyr/zephyr.elf",
+            "request": "launch",
+            "type": "cortex-debug",
+            "runToEntryPoint": "main",
+            "servertype": "stlink",
+            "gdbPath": "arm-zephyr-eabi-gdb",
+            "preLaunchTask": "🛠 Build App"
+        },
+        {
+            "name": "📘🧷 STlink attach",
+            "device": "stm32f103rb",
+            "cwd": "${workspaceFolder}",
+            "executable": "${config:build_dir}/zephyr/zephyr.elf",
+            "request": "attach",
+            "type": "cortex-debug",
+            "runToEntryPoint": "main",
+            "servertype": "stlink",
+            "gdbPath": "arm-zephyr-eabi-gdb"
+        },
+    ]
+}
