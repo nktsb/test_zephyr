@@ -1,14 +1,14 @@
 #include <stdio.h>
 #include <zephyr/kernel.h>
 #include <zephyr/sys/printk.h>
-#include <zephyr/logging/log.h>
 
 #include "interface.h"
-#include "temperature.h"
+#include "sensors.h"
 
 #define STACK_SIZE  2048U
 #define PRIORITY    7
-#define QUEUE_SIZE  1024U
+
+#define DEFAULT_sensors_qty 10
 
 static void interface_thread(void)
 {
@@ -19,19 +19,20 @@ static void interface_thread(void)
         interface_parse_task();
         interface_cmd_apply_task();
         // printk("Interface thread\r\n");
-        k_sleep(K_MSEC(10));
+        k_sleep(K_MSEC(1));
     }
 
 }
 
 static void sensors_thread(void)
 {
-	temp_sensor_init();
+	sensors_init(DEFAULT_sensors_qty);
 
     for(;;)
     {
+        sensors_data_update_task();
         // printk("Sensors thread\r\n");
-        k_sleep(K_MSEC(10));
+        k_sleep(K_MSEC(1));
     }
 }
 

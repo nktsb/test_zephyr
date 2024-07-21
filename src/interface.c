@@ -5,6 +5,8 @@
 #include <zephyr/sys/printk.h>
 #include <zephyr/spinlock.h>
 
+#include "sensors.h"
+
 #define RX_BUFFER_SIZE     512
 #define CMD_LAST_SYMBOL    '\n'
 
@@ -136,18 +138,17 @@ void interface_cmd_apply_task(void)
                 break;
             case CMD_QUANTITY:
                 uint16_t qty = atoi(cmd_parser.cmd_args);
-                printk("Changed sensor qty to %d\r\n", qty);
+                sensors_change_quantity(qty);
                 break;
             case CMD_PERIOD:
-
                 uint16_t sensor = atoi(cmd_parser.cmd_args);
 
                 do { cmd_parser.cmd_args++; }
                 while (*cmd_parser.cmd_args != ' ' && *cmd_parser.cmd_args != '\0');
-                
-                uint16_t period = atoi(cmd_parser.cmd_args);
 
-                printk("Changed sensor %d period to %d\r\n", sensor, period);
+                uint16_t period = atoi(cmd_parser.cmd_args);
+                
+                sensors_change_period(sensor, period);
                 break;
             default:
                 break;

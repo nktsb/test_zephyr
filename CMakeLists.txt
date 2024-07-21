@@ -6,5 +6,6 @@ project(test_zephyr)
 
 target_sources(app PRIVATE  src/main.c
                             src/interface.c
+                            src/sensors.c
                             src/temperature.c
 )
