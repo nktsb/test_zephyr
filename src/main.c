@@ -10,15 +10,16 @@
 #define PRIORITY    7
 #define QUEUE_SIZE  1024U
 
-K_MSGQ_DEFINE(sensor_queue, sizeof(int), QUEUE_SIZE, 4);
-
 static void interface_thread(void)
 {
     interface_init();
+
     for(;;)
     {
-        printk("Interface thread\r\n");
-        k_sleep(K_MSEC(100));
+        interface_parse_task();
+        interface_cmd_apply_task();
+        // printk("Interface thread\r\n");
+        k_sleep(K_MSEC(10));
     }
 
 }
@@ -29,8 +30,8 @@ static void sensors_thread(void)
 
     for(;;)
     {
-        printk("Sensors thread\r\n");
-        k_sleep(K_MSEC(100));
+        // printk("Sensors thread\r\n");
+        k_sleep(K_MSEC(10));
     }
 }
 
