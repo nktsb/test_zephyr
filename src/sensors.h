@@ -4,13 +4,10 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <zephyr/kernel.h>
 
-void sensors_init(uint16_t quantity);
-
-void sensors_change_quantity(uint16_t new_qty);
-void sensors_change_period(uint16_t sensor_idx, uint16_t period);
-
+void sensors_init(uint16_t quantity, struct k_msgq * sensors_cmd_msgq);
 void sensors_data_update_task(void);
-void sensors_change_quantity(uint16_t new_qty);
+void sensors_handle_cmd_task(void);
 
 #endif /* __SENSORS_H_ */

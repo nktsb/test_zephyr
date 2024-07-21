@@ -8,16 +8,19 @@
 #define STACK_SIZE  2048U
 #define PRIORITY    7
 
-#define DEFAULT_sensors_qty 10
+#define DEFAULT_SENSORS_QTY 10
+
+#define CMD_QUEUE_SIZE  16
+
+K_MSGQ_DEFINE(sensors_cmd_queue, sizeof(sensor_cmd_t), CMD_QUEUE_SIZE, 4);
 
 static void interface_thread(void)
 {
-    interface_init();
+    interface_init(&sensors_cmd_queue);
 
     for(;;)
     {
         interface_parse_task();
-        interface_cmd_apply_task();
         // printk("Interface thread\r\n");
         k_sleep(K_MSEC(1));
     }
@@ -26,11 +29,12 @@ static void interface_thread(void)
 
 static void sensors_thread(void)
 {
-	sensors_init(DEFAULT_sensors_qty);
+	sensors_init(DEFAULT_SENSORS_QTY, &sensors_cmd_queue);
 
     for(;;)
     {
         sensors_data_update_task();
+        sensors_handle_cmd_task();
         // printk("Sensors thread\r\n");
         k_sleep(K_MSEC(1));
     }

@@ -1,7 +1,9 @@
 #include "sensors.h"
-#include "temperature.h"
 #include <zephyr/kernel.h>
-#include <zephyr/sys/mutex.h>
+#include <zephyr/sys/printk.h>
+
+#include "temperature.h"
+#include "interface.h"
 
 #define SENSORS_MAX_QTY     256
 #define SENSORS_MIN_PER_MS  100
@@ -11,7 +13,9 @@
 
 static int16_t (*def_get_val_func)() = temp_sensor_read;
 
-K_MUTEX_DEFINE(sensors_mtx);
+static const char *sensor_pckt_preamble = "SENS";
+
+static struct k_msgq * sensors_cmd_queue = NULL;
 
 typedef struct sensor {
 
@@ -33,7 +37,6 @@ static sensors_arr_st sensors_array = {0};
 static inline void sensors_array_init(uint16_t quantity, 
         int64_t def_timeout, int16_t (*get_val_func)() )
 {
-    k_mutex_lock(&sensors_mtx, K_FOREVER);
     sensors_array.quantity = quantity;
     sensors_array.sensors = calloc(quantity, sizeof(sensor_st));
     int64_t current_time_ms = k_uptime_get();
@@ -46,17 +49,27 @@ static inline void sensors_array_init(uint16_t quantity,
         sensor->last_value = 0;
         sensor->last_read_stamp_ms = current_time_ms;
     }
-    k_mutex_unlock(&sensors_mtx);
 }
 
-void sensors_change_period(uint16_t sensor_idx, uint16_t period)
+static void sensors_prepare_packet(void)
 {
-    k_mutex_lock(&sensors_mtx, K_FOREVER);
+    uint8_t max_sensor_string_len = strlen(sensor_pckt_preamble) + 9; // SENS256:-28\r\n
+    char *sensors_data_string = calloc(sensors_array.quantity * max_sensor_string_len, sizeof(char));
 
+    for(sensor_st *sensor = sensors_array.sensors; 
+            sensor < (sensors_array.sensors + sensors_array.quantity); sensor++)
+    {
+        char buffer[max_sensor_string_len];
+        snprintk(buffer, sizeof(buffer), "%s:%d\r\n", sensor_pckt_preamble, sensor->last_value);
+        strcat(sensors_data_string, buffer);
+    }
+}
+
+static void sensors_change_period(uint16_t sensor_idx, uint16_t period)
+{
     if(sensor_idx >= sensors_array.quantity)
     {
-        printk("Wrong sensor idx %d\r\n", sensor_idx);
-        k_mutex_unlock(&sensors_mtx);
+        printk("There is no sensor %d\r\n", sensor_idx);
         return;
     }
 
@@ -66,46 +79,52 @@ void sensors_change_period(uint16_t sensor_idx, uint16_t period)
     sensors_array.sensors[sensor_idx].period_ms = period;
 
     printk("Changed sensor %d period to %d\r\n", sensor_idx, period);
-
-    k_mutex_unlock(&sensors_mtx);
 }
 
-void sensors_change_quantity(uint16_t new_qty)
+static void sensors_change_quantity(uint16_t new_qty)
 {
     if(new_qty > SENSORS_MAX_QTY) new_qty = SENSORS_MAX_QTY;
-
-    k_mutex_lock(&sensors_mtx, K_FOREVER);
-    sensor_st *new_sensors = calloc(new_qty, sizeof(sensor_st));
-    memcpy(new_sensors, sensors_array.sensors, (sensors_array.quantity * sizeof(sensor_st)));
-    int64_t current_time_ms = k_uptime_get();
-
-    for(sensor_st *sensor = &new_sensors[sensors_array.quantity]; 
-            sensor < (&new_sensors[sensors_array.quantity] + new_qty); sensor++)
+    if(new_qty == sensors_array.quantity)
     {
-        sensor->get_val_func = def_get_val_func;
-        sensor->period_ms = SENSORS_DEF_PER_MS;
-        sensor->last_value = 0;
-        sensor->last_read_stamp_ms = current_time_ms;
+        printk("It's actual quantity\r\n");
+        return;
     }
+
+    sensor_st *new_sensors = calloc(new_qty, sizeof(sensor_st));
+
+    if(new_qty > sensors_array.quantity)
+    {
+        memcpy(new_sensors, sensors_array.sensors, (sensors_array.quantity * sizeof(sensor_st)));
+        int64_t current_time_ms = k_uptime_get();
+        for(sensor_st *sensor = &new_sensors[sensors_array.quantity]; 
+                sensor < (&new_sensors[sensors_array.quantity] + new_qty); sensor++)
+        {
+            sensor->get_val_func = def_get_val_func;
+            sensor->period_ms = SENSORS_DEF_PER_MS;
+            sensor->last_value = 0;
+            sensor->last_read_stamp_ms = current_time_ms;
+        }
+    }
+    else
+        memcpy(new_sensors, sensors_array.sensors, (new_qty * sizeof(sensor_st)));
 
     free(sensors_array.sensors);
     sensors_array.sensors = new_sensors;
     sensors_array.quantity = new_qty;
-    k_mutex_unlock(&sensors_mtx);
 
     printk("Changed sensor qty to %d\r\n", new_qty);
 }
 
-void sensors_init(uint16_t quantity)
+void sensors_init(uint16_t quantity, struct k_msgq * sensors_cmd_msgq)
 {
+    sensors_cmd_queue = sensors_cmd_msgq;
+
     temp_sensor_init();
     sensors_array_init(quantity, SENSORS_DEF_PER_MS, def_get_val_func);
-    k_mutex_init(&sensors_mtx);
 }
 
 void sensors_data_update_task(void)
 {
-    k_mutex_lock(&sensors_mtx, K_FOREVER);
     int64_t current_time_ms = k_uptime_get();
 
     for(sensor_st *sensor = sensors_array.sensors; 
@@ -117,5 +136,27 @@ void sensors_data_update_task(void)
             sensor->last_read_stamp_ms = current_time_ms;
         }
     }
-    k_mutex_unlock(&sensors_mtx);
+}
+
+void sensors_handle_cmd_task(void)
+{
+    sensor_cmd_t cmd_buff = {0};
+    if (k_msgq_get(sensors_cmd_queue, &cmd_buff, K_FOREVER) == 0)
+    {
+        switch(cmd_buff.cmd_type)
+        {
+            case CMD_PERIOD:
+                sensors_change_period(cmd_buff.idx, cmd_buff.period);
+                break;
+            case CMD_QUANTITY:
+                sensors_change_quantity(cmd_buff.idx);
+                break;
+            case CMD_READ:
+                break;
+            case CMD_TOGGLE:
+                break;
+            default:
+                break;
+        }
+    }
 }

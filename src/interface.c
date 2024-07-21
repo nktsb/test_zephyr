@@ -4,6 +4,7 @@
 #include <zephyr/devicetree.h>
 #include <zephyr/sys/printk.h>
 #include <zephyr/spinlock.h>
+#include <zephyr/kernel.h>
 
 #include "sensors.h"
 
@@ -11,6 +12,8 @@
 #define CMD_LAST_SYMBOL    '\n'
 
 static const struct device *uart_dev = DEVICE_DT_GET(DT_NODELABEL(usart2));
+
+static struct k_msgq * sensors_cmd_queue = NULL;
 
 struct k_spinlock rx_buffer_spinlock;
 static struct ring_buf uart_rx_buffer = {0};
@@ -21,33 +24,22 @@ static const char *toggle_cmd_preamble = "toggle";
 static const char *quantity_cmd_preamble = "quantity ";
 static const char *period_cmd_preamble = "period ";
 
-static const char *sensor_pckt_preamble = "SENS";
-
-typedef enum {
-    CMD_UNDEF,      // NO_CMD
-    CMD_READ,       // read sensors data "read\n"
-    CMD_TOGGLE,     // switch data type "toggle\n"
-    CMD_QUANTITY,   // change sensors quantity (up to 256) "quantity <q>\n", q - quantity
-    CMD_PERIOD      // update sensor's period  "period <n> <p>\n" n - sensor, p - period
-} cmd_t;
-
-typedef struct command_parser {
+struct command_parser {
 
     char buffer[16];
-    char *cmd_args;
     uint8_t counter;
-    cmd_t cmd;
-    
-    bool new_cmd_flg;
 
-} command_parser_st;
+    sensor_cmd_t cmd;
+};
 
-static command_parser_st cmd_parser = {
+static struct command_parser cmd_parser = {
     .buffer = {0},
     .counter = 0,
-    .cmd = CMD_UNDEF,
-    .cmd_args = cmd_parser.buffer,
-    .new_cmd_flg = false
+    .cmd = {
+        .idx = 0,
+        .period = 0,
+        .cmd_type = CMD_UNDEF
+    }
 };
 
 static void uart_cb(const struct device *dev, void *user_data)
@@ -62,23 +54,21 @@ static void uart_cb(const struct device *dev, void *user_data)
     k_spinlock_key_t key = k_spin_lock(&rx_buffer_spinlock);
     ring_buf_put(&uart_rx_buffer, &rx_byte, 1);
     k_spin_unlock(&rx_buffer_spinlock, key);
-
-    // printk("Uart callback!\r\n");
 }
 
 static void interface_reset_parser(void)
 {
     memset((void*)cmd_parser.buffer, 0, sizeof(cmd_parser.buffer));
-    cmd_parser.cmd_args = cmd_parser.buffer;
-    cmd_parser.cmd = CMD_UNDEF;
-    cmd_parser.new_cmd_flg = false;
+    cmd_parser.cmd.idx = 0;
+    cmd_parser.cmd.period = 0;
+    cmd_parser.cmd.cmd_type = CMD_UNDEF;
     cmd_parser.counter = 0;
 }
 
 void interface_parse_task(void)
 {
     k_spinlock_key_t key = k_spin_lock(&rx_buffer_spinlock);
-    if(!ring_buf_is_empty(&uart_rx_buffer) && !cmd_parser.new_cmd_flg)
+    if(!ring_buf_is_empty(&uart_rx_buffer))
     {
         uint8_t rx_byte = 0;
         ring_buf_get(&uart_rx_buffer, &rx_byte, 1);
@@ -87,36 +77,49 @@ void interface_parse_task(void)
         {
             if(strncmp(cmd_parser.buffer, read_cmd_preamble, strlen(read_cmd_preamble)) == 0)
             {
-                cmd_parser.cmd = CMD_READ;
-                cmd_parser.new_cmd_flg = true;
+                cmd_parser.cmd.cmd_type = CMD_READ;
             }
             else
             if(strncmp(cmd_parser.buffer, toggle_cmd_preamble, strlen(toggle_cmd_preamble)) == 0)
             {
-                cmd_parser.cmd = CMD_TOGGLE;
-                cmd_parser.new_cmd_flg = true;
+                cmd_parser.cmd.cmd_type = CMD_TOGGLE;
             }
             else
             if(strncmp(cmd_parser.buffer, quantity_cmd_preamble, strlen(quantity_cmd_preamble)) == 0)
             {
-                cmd_parser.cmd_args = &cmd_parser.buffer[strlen(quantity_cmd_preamble)];
-
-                cmd_parser.cmd = CMD_QUANTITY;
-                cmd_parser.new_cmd_flg = true;
+                char *cmd_args = &cmd_parser.buffer[strlen(quantity_cmd_preamble)];
+                char *endptr = NULL;
+                cmd_parser.cmd.idx = strtol(cmd_args, &endptr, 10);
+                cmd_parser.cmd.cmd_type = CMD_QUANTITY;
             }
             else
             if(strncmp(cmd_parser.buffer, period_cmd_preamble, strlen(period_cmd_preamble)) == 0)
             {
-                cmd_parser.cmd_args = &cmd_parser.buffer[strlen(period_cmd_preamble)];
+                char *cmd_args = &cmd_parser.buffer[strlen(period_cmd_preamble)];
+                char *endptr = NULL;
+                cmd_parser.cmd.idx = strtoul(cmd_args, &endptr, 10);
 
-                cmd_parser.cmd = CMD_PERIOD;
-                cmd_parser.new_cmd_flg = true;
+                if (*endptr == ' ')
+                {
+                    cmd_args = endptr + 1;
+                    cmd_parser.cmd.period = strtoul(cmd_args, NULL, 10);
+                }
+                else
+                    printk("Invalid period\r\n");
+
+                cmd_parser.cmd.cmd_type = CMD_PERIOD;
             }
             else
             {
                 printk("Wrong cmd\r\n");
                 interface_reset_parser();
+                return;
             }
+
+            if (k_msgq_put(sensors_cmd_queue, &cmd_parser.cmd, K_NO_WAIT) != 0)
+                printk("Failed to put cmd in queue\n");
+
+            interface_reset_parser();
         }
         else if(cmd_parser.counter < sizeof(cmd_parser.buffer) - 1)
         {
@@ -132,50 +135,14 @@ void interface_parse_task(void)
     k_spin_unlock(&rx_buffer_spinlock, key);
 }
 
-void interface_cmd_apply_task(void)
-{
-    if(cmd_parser.new_cmd_flg)
-    {
-        char *endptr = NULL;
-        switch(cmd_parser.cmd)
-        {
-            case CMD_READ:
-                printk("Read cmd received\r\n");
-                break;
-            case CMD_TOGGLE:
-                printk("Data format toggled\r\n");
-                break;
-            case CMD_QUANTITY:
-                uint16_t qty = strtol(cmd_parser.cmd_args, &endptr, 10);
-                sensors_change_quantity(qty);
-                break;
-            case CMD_PERIOD:
-                uint16_t sensor = strtoul(cmd_parser.cmd_args, &endptr, 10);
-
-                if (*endptr == ' ')
-                {
-                    cmd_parser.cmd_args = endptr + 1;
-                    uint16_t period = strtoul(cmd_parser.cmd_args, NULL, 10);
-                    sensors_change_period((uint16_t)sensor, (uint16_t)period);
-                }
-                else
-                    printk("Invalid period\r\n");
-
-                break;
-            default:
-                break;
-        }
-
-        interface_reset_parser();
-    }
-}
-
-void interface_init(void)
+void interface_init(struct k_msgq * sensors_cmd_msgq)
 {
     if (!device_is_ready(uart_dev)) {
         printk("Cannot find UART device!\n");
         return;
     }
+
+    sensors_cmd_queue = sensors_cmd_msgq;
 
     uart_irq_callback_set(uart_dev, uart_cb);
     uart_irq_rx_enable(uart_dev);
