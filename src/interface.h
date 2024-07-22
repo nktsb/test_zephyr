@@ -21,7 +21,8 @@ typedef struct sensor_cmd {
     uint16_t period;
 } sensor_cmd_t;
 
-void interface_init(struct k_msgq * sensors_cmd_msgq);
+void interface_init(struct k_msgq * sensors_cmd_msgq, struct k_msgq * sensors_data_msgq);
 void interface_parse_task(void);
+void interface_transmit_task(void);
 
 #endif /* __INTERFACE_H_ */

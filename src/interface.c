@@ -1,23 +1,14 @@
 #include "interface.h"
-#include <zephyr/drivers/uart.h>
-#include <zephyr/sys/ring_buffer.h>
-#include <zephyr/devicetree.h>
 #include <zephyr/sys/printk.h>
-#include <zephyr/spinlock.h>
 #include <zephyr/kernel.h>
 
+#include "uart.h"
 #include "sensors.h"
 
-#define RX_BUFFER_SIZE     512
 #define CMD_LAST_SYMBOL    '\n'
 
-static const struct device *uart_dev = DEVICE_DT_GET(DT_NODELABEL(usart2));
-
 static struct k_msgq * sensors_cmd_queue = NULL;
-
-struct k_spinlock rx_buffer_spinlock;
-static struct ring_buf uart_rx_buffer = {0};
-static uint8_t uart_rx_buffer_data[RX_BUFFER_SIZE] = {0};
+static struct k_msgq * sensors_data_queue = NULL;
 
 static const char *read_cmd_preamble = "read";
 static const char *toggle_cmd_preamble = "toggle";
@@ -42,20 +33,6 @@ static struct command_parser cmd_parser = {
     }
 };
 
-static void uart_cb(const struct device *dev, void *user_data)
-{
-	if (!uart_irq_update(uart_dev)) return;
-	if (!uart_irq_rx_ready(uart_dev)) return;
-
-    uint8_t rx_byte = 0;
-
-    uart_fifo_read(uart_dev, &rx_byte, 1);
-
-    k_spinlock_key_t key = k_spin_lock(&rx_buffer_spinlock);
-    ring_buf_put(&uart_rx_buffer, &rx_byte, 1);
-    k_spin_unlock(&rx_buffer_spinlock, key);
-}
-
 static void interface_reset_parser(void)
 {
     memset((void*)cmd_parser.buffer, 0, sizeof(cmd_parser.buffer));
@@ -67,11 +44,9 @@ static void interface_reset_parser(void)
 
 void interface_parse_task(void)
 {
-    k_spinlock_key_t key = k_spin_lock(&rx_buffer_spinlock);
-    if(!ring_buf_is_empty(&uart_rx_buffer))
+    if(uart_is_rx_data())
     {
-        uint8_t rx_byte = 0;
-        ring_buf_get(&uart_rx_buffer, &rx_byte, 1);
+        uint8_t rx_byte = uart_get_byte();
 
         if(rx_byte == CMD_LAST_SYMBOL)
         {
@@ -132,20 +107,20 @@ void interface_parse_task(void)
         }
 
     }
-    k_spin_unlock(&rx_buffer_spinlock, key);
 }
 
-void interface_init(struct k_msgq * sensors_cmd_msgq)
+void interface_transmit_task(void)
 {
-    if (!device_is_ready(uart_dev)) {
-        printk("Cannot find UART device!\n");
-        return;
-    }
+    uint8_t tx_byte = 0;
+    if (k_msgq_get(sensors_data_queue, &tx_byte, K_NO_WAIT) == 0)
+        uart_send_byte(tx_byte);
+
+}
+
+void interface_init(struct k_msgq * sensors_cmd_msgq, struct k_msgq * sensors_data_msgq)
+{
+    uart_init();
 
     sensors_cmd_queue = sensors_cmd_msgq;
-
-    uart_irq_callback_set(uart_dev, uart_cb);
-    uart_irq_rx_enable(uart_dev);
-
-    ring_buf_init(&uart_rx_buffer, RX_BUFFER_SIZE, uart_rx_buffer_data);
+    sensors_data_queue = sensors_data_msgq;
 }

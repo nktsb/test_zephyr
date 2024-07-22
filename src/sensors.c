@@ -16,6 +16,7 @@ static int16_t (*def_get_val_func)() = temp_sensor_read;
 static const char *sensor_pckt_preamble = "SENS";
 
 static struct k_msgq * sensors_cmd_queue = NULL;
+static struct k_msgq * sensors_data_queue = NULL;
 
 typedef struct sensor {
 
@@ -51,18 +52,21 @@ static inline void sensors_array_init(uint16_t quantity,
     }
 }
 
-static void sensors_prepare_packet(void)
+static void sensors_send_packet(void)
 {
     uint8_t max_sensor_string_len = strlen(sensor_pckt_preamble) + 9; // SENS256:-28\r\n
-    char *sensors_data_string = calloc(sensors_array.quantity * max_sensor_string_len, sizeof(char));
+    uint16_t pckt_size = sensors_array.quantity * max_sensor_string_len;
+    char *sensors_data_pckt = calloc(pckt_size, sizeof(char));
 
-    for(sensor_st *sensor = sensors_array.sensors; 
-            sensor < (sensors_array.sensors + sensors_array.quantity); sensor++)
+    for(uint16_t idx = 0; idx < sensors_array.quantity; idx++)
     {
-        char buffer[max_sensor_string_len];
-        snprintk(buffer, sizeof(buffer), "%s:%d\r\n", sensor_pckt_preamble, sensor->last_value);
-        strcat(sensors_data_string, buffer);
+        sensor_st *sensor = &sensors_array.sensors[idx];
+        char buffer[64] = {0};
+        snprintk(buffer, sizeof(buffer), "%s%d:%d\r\n", sensor_pckt_preamble, idx, sensor->last_value);
+        strcat(sensors_data_pckt, buffer);
     }
+    for(char *symbol = sensors_data_pckt; symbol < sensors_data_pckt + pckt_size; symbol++)
+        k_msgq_put(sensors_data_queue, symbol, K_FOREVER);
 }
 
 static void sensors_change_period(uint16_t sensor_idx, uint16_t period)
@@ -115,9 +119,10 @@ static void sensors_change_quantity(uint16_t new_qty)
     printk("Changed sensor qty to %d\r\n", new_qty);
 }
 
-void sensors_init(uint16_t quantity, struct k_msgq * sensors_cmd_msgq)
+void sensors_init(uint16_t quantity, struct k_msgq * sensors_cmd_msgq, struct k_msgq * sensors_data_msgq)
 {
     sensors_cmd_queue = sensors_cmd_msgq;
+    sensors_data_queue = sensors_data_msgq;
 
     temp_sensor_init();
     sensors_array_init(quantity, SENSORS_DEF_PER_MS, def_get_val_func);
@@ -141,7 +146,7 @@ void sensors_data_update_task(void)
 void sensors_handle_cmd_task(void)
 {
     sensor_cmd_t cmd_buff = {0};
-    if (k_msgq_get(sensors_cmd_queue, &cmd_buff, K_FOREVER) == 0)
+    if (k_msgq_get(sensors_cmd_queue, &cmd_buff, K_NO_WAIT) == 0)
     {
         switch(cmd_buff.cmd_type)
         {
@@ -152,8 +157,10 @@ void sensors_handle_cmd_task(void)
                 sensors_change_quantity(cmd_buff.idx);
                 break;
             case CMD_READ:
+                sensors_send_packet();
                 break;
             case CMD_TOGGLE:
+                printk("Toggle command received\r\n");
                 break;
             default:
                 break;
