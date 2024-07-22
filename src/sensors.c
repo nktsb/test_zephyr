@@ -11,13 +11,6 @@
 
 #define SENSORS_DEF_PER_MS  2000
 
-static int16_t (*def_get_val_func)() = temp_sensor_read;
-
-static const char *sensor_pckt_preamble = "SENS";
-
-static struct k_msgq * sensors_cmd_queue = NULL;
-static struct k_msgq * sensors_data_queue = NULL;
-
 typedef enum {
     FORMAT_STRING,
     FORMAT_BINARY,
@@ -27,8 +20,8 @@ typedef enum {
 
 typedef struct sensor {
 
-    int64_t period_ms;
     int64_t last_read_stamp_ms;
+    uint16_t period_ms;
     int16_t last_value;
 
     int16_t (*get_val_func)();
@@ -40,9 +33,17 @@ typedef struct sensors_arr {
     uint16_t quantity;
 } sensors_arr_st;
 
-static sensors_arr_st sensors_array = {0};
+static int16_t (*def_get_val_func)() = temp_sensor_read;
 
+static const char *sensor_pckt_preamble = "SENS";
+
+static struct k_msgq * sensors_cmd_queue = NULL;
+static struct k_msgq * sensors_data_queue = NULL;
+
+static sensors_arr_st sensors_array = {0};
 static data_format_t sensors_data_format = FORMAT_STRING;
+
+static uint16_t min_sensor_period_ms = 2000;
 
 static inline void sensors_array_init(uint16_t quantity, 
         int64_t def_timeout, int16_t (*get_val_func)() )
@@ -51,7 +52,7 @@ static inline void sensors_array_init(uint16_t quantity,
     sensors_array.sensors = calloc(quantity, sizeof(sensor_st));
     if(sensors_array.sensors == NULL)
     {
-        printk("Calloc failed: sensors array");
+        printk("Calloc failed: init sensors array");
         return;
     }
     int64_t current_time_ms = k_uptime_get();
@@ -102,7 +103,15 @@ static void sensors_change_period(uint16_t sensor_idx, uint16_t period)
 
     sensors_array.sensors[sensor_idx].period_ms = period;
 
-    printk("Changed sensor %d period to %d\r\n", sensor_idx, period);
+    min_sensor_period_ms = SENSORS_MAX_PER_MS;
+    for(sensor_st *sensor = sensors_array.sensors; 
+            sensor < (sensors_array.sensors + sensors_array.quantity); sensor++)
+    {
+        if(sensor->period_ms < min_sensor_period_ms)
+            min_sensor_period_ms = sensor->period_ms;
+    }
+
+    printk("Changed sensor %d period to %d ms\r\n", sensor_idx, period);
 }
 
 static void sensors_change_quantity(uint16_t new_qty)
@@ -160,12 +169,14 @@ void sensors_data_update_task(void)
     for(sensor_st *sensor = sensors_array.sensors; 
             sensor < (sensors_array.sensors + sensors_array.quantity); sensor++)
     {
-        if(current_time_ms - sensor->last_read_stamp_ms >= sensor->period_ms)
+        if((current_time_ms - sensor->last_read_stamp_ms) >= sensor->period_ms)
         {
             sensor->last_value = sensor->get_val_func();
             sensor->last_read_stamp_ms = current_time_ms;
         }
     }
+    k_sleep(K_MSEC(min_sensor_period_ms));
+    k_cpu_idle();
 }
 
 void sensors_handle_cmd_task(void)
