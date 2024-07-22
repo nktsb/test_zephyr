@@ -1,0 +1,8 @@
+{
+    "cmake.configureOnOpen": false,
+
+    "build_dir": "${workspaceFolder}/Output",
+    "board": "nucleo_f103rb",
+    "files.associations": {
+    }
+}
