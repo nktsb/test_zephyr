@@ -10,7 +10,7 @@
 
 #define DEFAULT_SENSORS_QTY 10
 
-#define CMD_QUEUE_SIZE  16
+#define CMD_QUEUE_SIZE   16
 #define DATA_QUEUE_SIZE  256
 
 K_MSGQ_DEFINE(sensors_cmd_queue, sizeof(sensor_cmd_t), CMD_QUEUE_SIZE, 4);

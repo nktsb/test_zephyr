@@ -41,9 +41,9 @@ static void uart_cb(const struct device *dev, void *user_data)
     if(uart_irq_tx_ready(uart_dev))
     {
         k_spinlock_key_t key = k_spin_lock(&tx_buffer_spinlock);
-        uint8_t tx_byte;
+        uint8_t tx_byte = 0;
         if(ring_buf_get(&uart_tx_buffer, &tx_byte, 1) == 0)
-            uart_irq_tx_disable(uart_dev);  // No more data to send
+            uart_irq_tx_disable(uart_dev);
         else
             uart_fifo_fill(uart_dev, &tx_byte, 1);
 
@@ -90,4 +90,5 @@ void uart_send_byte(uint8_t byte)
     ring_buf_put(&uart_tx_buffer, &byte, 1);
     k_spin_unlock(&tx_buffer_spinlock, key);
     uart_irq_tx_enable(uart_dev);
+    k_sleep(K_USEC(10));
 }

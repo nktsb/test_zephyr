@@ -9,7 +9,7 @@
 #define SENSORS_MIN_PER_MS  100
 #define SENSORS_MAX_PER_MS  2000
 
-#define SENSORS_DEF_PER_MS  1000
+#define SENSORS_DEF_PER_MS  2000
 
 static int16_t (*def_get_val_func)() = temp_sensor_read;
 

@@ -44,7 +44,7 @@ static void interface_reset_parser(void)
 
 void interface_parse_task(void)
 {
-    if(uart_is_rx_data())
+    while(uart_is_rx_data())
     {
         uint8_t rx_byte = uart_get_byte();
 
@@ -112,9 +112,8 @@ void interface_parse_task(void)
 void interface_transmit_task(void)
 {
     uint8_t tx_byte = 0;
-    if (k_msgq_get(sensors_data_queue, &tx_byte, K_NO_WAIT) == 0)
+    while(k_msgq_get(sensors_data_queue, &tx_byte, K_NO_WAIT) == 0)
         uart_send_byte(tx_byte);
-
 }
 
 void interface_init(struct k_msgq * sensors_cmd_msgq, struct k_msgq * sensors_data_msgq)
