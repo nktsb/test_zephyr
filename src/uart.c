@@ -5,7 +5,7 @@
 #include <zephyr/devicetree.h>
 
 #define RX_BUFFER_SIZE     512
-#define TX_BUFFER_SIZE     512
+#define TX_BUFFER_SIZE     1024
 
 static const struct device *uart_dev = DEVICE_DT_GET(DT_NODELABEL(usart2));
 

@@ -1,5 +1,6 @@
 #include "temperature.h"
 #include <zephyr/drivers/adc.h>
+#include <zephyr/random/random.h>
 
 static const uint16_t V25_mV = 1430;
 static const float Avg_Slope = 4.3;
@@ -20,6 +21,8 @@ void temp_sensor_init(void)
     ADC1->CR2 |= ADC_CR2_CAL;
     while (!(ADC1->CR2 & ADC_CR2_CAL));
 
+#else   /* CONFIG_BOARD_NUCLEO_F103RB */
+    srand(0);
 #endif /* CONFIG_BOARD_NUCLEO_F103RB */
 }
 
@@ -37,8 +40,6 @@ int16_t temp_sensor_read(void)
     return ((V25_mV - adc_value_mV) / Avg_Slope) + 25;
 
 #else /* CONFIG_BOARD_NUCLEO_F103RB */
-
-    return (sys_rand32_get() % 35);
-
+    return (rand() % 35);
 #endif /* CONFIG_BOARD_NUCLEO_F103RB */
 }

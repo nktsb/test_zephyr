@@ -18,6 +18,13 @@ static const char *sensor_pckt_preamble = "SENS";
 static struct k_msgq * sensors_cmd_queue = NULL;
 static struct k_msgq * sensors_data_queue = NULL;
 
+typedef enum {
+    FORMAT_STRING,
+    FORMAT_BINARY,
+
+    FORMATS_QTY
+} data_format_t;
+
 typedef struct sensor {
 
     int64_t period_ms;
@@ -35,11 +42,18 @@ typedef struct sensors_arr {
 
 static sensors_arr_st sensors_array = {0};
 
+static data_format_t sensors_data_format = FORMAT_STRING;
+
 static inline void sensors_array_init(uint16_t quantity, 
         int64_t def_timeout, int16_t (*get_val_func)() )
 {
     sensors_array.quantity = quantity;
     sensors_array.sensors = calloc(quantity, sizeof(sensor_st));
+    if(sensors_array.sensors == NULL)
+    {
+        printk("Calloc failed: sensors array");
+        return;
+    }
     int64_t current_time_ms = k_uptime_get();
 
     for(sensor_st *sensor = sensors_array.sensors; 
@@ -52,21 +66,27 @@ static inline void sensors_array_init(uint16_t quantity,
     }
 }
 
-static void sensors_send_packet(void)
+static void sensors_send_string_packet(void)
 {
-    uint8_t max_sensor_string_len = strlen(sensor_pckt_preamble) + 9; // SENS256:-28\r\n
-    uint16_t pckt_size = sensors_array.quantity * max_sensor_string_len;
-    char *sensors_data_pckt = calloc(pckt_size, sizeof(char));
-
     for(uint16_t idx = 0; idx < sensors_array.quantity; idx++)
     {
         sensor_st *sensor = &sensors_array.sensors[idx];
         char buffer[64] = {0};
         snprintk(buffer, sizeof(buffer), "%s%d:%d\r\n", sensor_pckt_preamble, idx, sensor->last_value);
-        strcat(sensors_data_pckt, buffer);
+        for(char *symbol = buffer; symbol < buffer + strlen(buffer); symbol++)
+            k_msgq_put(sensors_data_queue, symbol, K_FOREVER);
     }
-    for(char *symbol = sensors_data_pckt; symbol < sensors_data_pckt + pckt_size; symbol++)
-        k_msgq_put(sensors_data_queue, symbol, K_FOREVER);
+}
+
+static void sensors_send_bin_packet(void)
+{
+    for(sensor_st *sensor = sensors_array.sensors; 
+            sensor < (sensors_array.sensors + sensors_array.quantity); sensor++)
+    {
+        int16_t sensor_data = sensor->last_value;
+        k_msgq_put(sensors_data_queue, (uint8_t*)&sensor_data, K_FOREVER);
+        k_msgq_put(sensors_data_queue, (uint8_t*)&sensor_data + 1, K_FOREVER);
+    }
 }
 
 static void sensors_change_period(uint16_t sensor_idx, uint16_t period)
@@ -95,6 +115,11 @@ static void sensors_change_quantity(uint16_t new_qty)
     }
 
     sensor_st *new_sensors = calloc(new_qty, sizeof(sensor_st));
+    if(new_sensors == NULL)
+    {
+        printk("Calloc failed: updating sensors qty");
+        return;
+    }
 
     if(new_qty > sensors_array.quantity)
     {
@@ -157,10 +182,32 @@ void sensors_handle_cmd_task(void)
                 sensors_change_quantity(cmd_buff.idx);
                 break;
             case CMD_READ:
-                sensors_send_packet();
+                switch(sensors_data_format)
+                {
+                    case FORMAT_STRING:
+                        sensors_send_string_packet();
+                        break;
+                    case FORMAT_BINARY:
+                        sensors_send_bin_packet();
+                        break;
+                    default:
+                        break;
+                }
                 break;
             case CMD_TOGGLE:
-                printk("Toggle command received\r\n");
+                sensors_data_format++;
+                sensors_data_format %= FORMATS_QTY;
+                switch(sensors_data_format)
+                {
+                    case FORMAT_STRING:
+                        printk("Format toggled to string\r\n");
+                        break;
+                    case FORMAT_BINARY:
+                        printk("Format toggled to bin\r\n");
+                        break;
+                    default:
+                        break;
+                }
                 break;
             default:
                 break;
