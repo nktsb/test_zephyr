@@ -1,9 +1,11 @@
 #include <stdio.h>
 #include <zephyr/kernel.h>
-#include <zephyr/sys/printk.h>
+#include <zephyr/logging/log.h>
 
 #include "interface.h"
 #include "sensors.h"
+
+LOG_MODULE_REGISTER(logger, LOG_LEVEL_INF);
 
 #define STACK_SIZE  2048U
 #define PRIORITY    7
@@ -24,7 +26,7 @@ static void interface_thread(void)
     {
         interface_parse_task();
         interface_transmit_task();
-        // printk("Interface thread\r\n");
+        // LOG_DBG("Interface thread!");
         k_sleep(K_MSEC(1));
     }
 
@@ -38,13 +40,14 @@ static void sensors_thread(void)
     {
         sensors_data_update_task();
         sensors_handle_cmd_task();
-        // printk("Sensors thread\r\n");
+        // LOG_DBG("Sensors thread");
         k_sleep(K_MSEC(1));
     }
 }
 
 int main(void)
 {
+    LOG_INF("Program started!");
 	return 0;
 }
 

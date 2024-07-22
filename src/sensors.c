@@ -1,9 +1,12 @@
 #include "sensors.h"
 #include <zephyr/kernel.h>
 #include <zephyr/sys/printk.h>
+#include <zephyr/logging/log.h>
 
 #include "temperature.h"
 #include "interface.h"
+
+LOG_MODULE_DECLARE(logger);
 
 #define SENSORS_MAX_QTY     256
 #define SENSORS_MIN_PER_MS  100
@@ -52,7 +55,7 @@ static inline void sensors_array_init(uint16_t quantity,
     sensors_array.sensors = calloc(quantity, sizeof(sensor_st));
     if(sensors_array.sensors == NULL)
     {
-        printk("Calloc failed: init sensors array");
+        LOG_ERR("Calloc failed: init sensors array");
         return;
     }
     int64_t current_time_ms = k_uptime_get();
@@ -94,7 +97,7 @@ static void sensors_change_period(uint16_t sensor_idx, uint16_t period)
 {
     if(sensor_idx >= sensors_array.quantity)
     {
-        printk("There is no sensor %d\r\n", sensor_idx);
+        LOG_WRN("There is no sensor %d!", sensor_idx);
         return;
     }
 
@@ -111,7 +114,7 @@ static void sensors_change_period(uint16_t sensor_idx, uint16_t period)
             min_sensor_period_ms = sensor->period_ms;
     }
 
-    printk("Changed sensor %d period to %d ms\r\n", sensor_idx, period);
+    LOG_INF("Changed sensor %d period to %d ms\r\n", sensor_idx, period);
 }
 
 static void sensors_change_quantity(uint16_t new_qty)
@@ -119,14 +122,14 @@ static void sensors_change_quantity(uint16_t new_qty)
     if(new_qty > SENSORS_MAX_QTY) new_qty = SENSORS_MAX_QTY;
     if(new_qty == sensors_array.quantity)
     {
-        printk("It's actual quantity\r\n");
+        LOG_WRN("It's actual quantity!");
         return;
     }
 
     sensor_st *new_sensors = calloc(new_qty, sizeof(sensor_st));
     if(new_sensors == NULL)
     {
-        printk("Calloc failed: updating sensors qty");
+        LOG_ERR("Calloc failed: updating sensors qty");
         return;
     }
 
@@ -150,7 +153,7 @@ static void sensors_change_quantity(uint16_t new_qty)
     sensors_array.sensors = new_sensors;
     sensors_array.quantity = new_qty;
 
-    printk("Changed sensor qty to %d\r\n", new_qty);
+    LOG_INF("Changed sensor qty to %d\r\n", new_qty);
 }
 
 void sensors_init(uint16_t quantity, struct k_msgq * sensors_cmd_msgq, struct k_msgq * sensors_data_msgq)
@@ -166,6 +169,7 @@ void sensors_data_update_task(void)
 {
     int64_t current_time_ms = k_uptime_get();
 
+    uint16_t sensor_idx = 0;
     for(sensor_st *sensor = sensors_array.sensors; 
             sensor < (sensors_array.sensors + sensors_array.quantity); sensor++)
     {
@@ -173,7 +177,9 @@ void sensors_data_update_task(void)
         {
             sensor->last_value = sensor->get_val_func();
             sensor->last_read_stamp_ms = current_time_ms;
+            LOG_INF("Sensor %d data updated: %d", sensor_idx, sensor->last_value);
         }
+        sensor_idx++;
     }
     k_sleep(K_MSEC(min_sensor_period_ms));
     k_cpu_idle();
@@ -211,10 +217,10 @@ void sensors_handle_cmd_task(void)
                 switch(sensors_data_format)
                 {
                     case FORMAT_STRING:
-                        printk("Format toggled to string\r\n");
+                        LOG_INF("Format toggled to string!");
                         break;
                     case FORMAT_BINARY:
-                        printk("Format toggled to bin\r\n");
+                        LOG_INF("Format toggled to bin!");
                         break;
                     default:
                         break;

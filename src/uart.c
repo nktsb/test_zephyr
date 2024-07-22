@@ -3,6 +3,9 @@
 #include <zephyr/spinlock.h>
 #include <zephyr/sys/ring_buffer.h>
 #include <zephyr/devicetree.h>
+#include <zephyr/logging/log.h>
+
+LOG_MODULE_DECLARE(logger);
 
 #define RX_BUFFER_SIZE     512
 #define TX_BUFFER_SIZE     1024
@@ -49,6 +52,7 @@ static void uart_cb(const struct device *dev, void *user_data)
 
         k_spin_unlock(&tx_buffer_spinlock, key);
     }
+    LOG_DBG("Uart callback\r\n");
 }
 
 void uart_init(void)
@@ -56,7 +60,7 @@ void uart_init(void)
     uart_configure(uart_dev, &uart_cfg);
 
     if (!device_is_ready(uart_dev)) {
-        printk("Cannot find UART device!\n");
+        LOG_ERR("Cannot find UART device!\n");
         return;
     }
     uart_irq_callback_set(uart_dev, uart_cb);

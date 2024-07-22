@@ -1,9 +1,11 @@
 #include "interface.h"
-#include <zephyr/sys/printk.h>
 #include <zephyr/kernel.h>
+#include <zephyr/logging/log.h>
 
 #include "uart.h"
 #include "sensors.h"
+
+LOG_MODULE_DECLARE(logger);
 
 #define CMD_LAST_SYMBOL    '\n'
 
@@ -80,19 +82,19 @@ void interface_parse_task(void)
                     cmd_parser.cmd.period = strtoul(cmd_args, NULL, 10);
                 }
                 else
-                    printk("Invalid period\r\n");
+                    LOG_WRN("Invalid period!");
 
                 cmd_parser.cmd.cmd_type = CMD_PERIOD;
             }
             else
             {
-                printk("Wrong cmd\r\n");
+                LOG_WRN("Wrong cmd!");
                 interface_reset_parser();
                 return;
             }
 
             if (k_msgq_put(sensors_cmd_queue, &cmd_parser.cmd, K_NO_WAIT) != 0)
-                printk("Failed to put cmd in queue\n");
+                LOG_ERR("Failed to put cmd in queue!");
 
             interface_reset_parser();
         }
@@ -102,7 +104,7 @@ void interface_parse_task(void)
         }
         else
         {
-            printk("Command buffer overflow!\r\n");
+            LOG_WRN("Command buffer overflow!");
             interface_reset_parser();
         }
 
