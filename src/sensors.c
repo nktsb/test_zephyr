@@ -186,7 +186,7 @@ void sensors_data_update_task(void)
         }
         sensor_idx++;
     }
-    k_sleep(K_MSEC(min_sensor_period_ms));
+    k_sleep(K_MSEC(min_sensor_period_ms / 2));
     k_cpu_idle();
 }
 

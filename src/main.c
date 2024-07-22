@@ -26,7 +26,7 @@ static void interface_thread(void)
     {
         interface_parse_task();
         interface_transmit_task();
-        // LOG_DBG("Interface thread!");
+        LOG_DBG("Interface thread!");
         k_sleep(K_MSEC(1));
     }
 
@@ -40,7 +40,7 @@ static void sensors_thread(void)
     {
         sensors_data_update_task();
         sensors_handle_cmd_task();
-        // LOG_DBG("Sensors thread");
+        LOG_DBG("Sensors thread");
         k_sleep(K_MSEC(1));
     }
 }
