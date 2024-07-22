@@ -30,25 +30,25 @@ const struct uart_config uart_cfg = {
 
 static void uart_cb(const struct device *dev, void *user_data)
 {
-	if(!uart_irq_update(uart_dev)) return;
+	if(!uart_irq_update(dev)) return;
 
-    if(uart_irq_rx_ready(uart_dev))
+    if(uart_irq_rx_ready(dev))
     {
         uint8_t rx_byte = 0;
-        uart_fifo_read(uart_dev, &rx_byte, 1);
+        uart_fifo_read(dev, &rx_byte, 1);
 
         k_spinlock_key_t key = k_spin_lock(&rx_buffer_spinlock);
         ring_buf_put(&uart_rx_buffer, &rx_byte, 1);
         k_spin_unlock(&rx_buffer_spinlock, key);
     }
-    if(uart_irq_tx_ready(uart_dev))
+    if(uart_irq_tx_ready(dev))
     {
         k_spinlock_key_t key = k_spin_lock(&tx_buffer_spinlock);
         uint8_t tx_byte = 0;
         if(ring_buf_get(&uart_tx_buffer, &tx_byte, 1) == 0)
-            uart_irq_tx_disable(uart_dev);
+            uart_irq_tx_disable(dev);
         else
-            uart_fifo_fill(uart_dev, &tx_byte, 1);
+            uart_fifo_fill(dev, &tx_byte, 1);
 
         k_spin_unlock(&tx_buffer_spinlock, key);
     }

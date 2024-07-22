@@ -125,6 +125,11 @@ static void sensors_change_quantity(uint16_t new_qty)
         LOG_WRN("It's actual quantity!");
         return;
     }
+    if(new_qty == 0)
+    {
+        LOG_WRN("Invalid quantity!");
+        return;
+    }
 
     sensor_st *new_sensors = calloc(new_qty, sizeof(sensor_st));
     if(new_sensors == NULL)
