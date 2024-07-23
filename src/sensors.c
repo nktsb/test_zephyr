@@ -34,6 +34,8 @@ typedef struct sensor {
 typedef struct sensors_arr {
     sensor_st *sensors;
     uint16_t quantity;
+    data_format_t data_format;
+    uint16_t min_period_ms;
 } sensors_arr_st;
 
 static int16_t (*def_get_val_func)() = temp_sensor_read;
@@ -43,10 +45,13 @@ static const char *sensor_pckt_preamble = "SENS";
 static struct k_msgq * sensors_cmd_queue = NULL;
 static struct k_msgq * sensors_data_queue = NULL;
 
-static sensors_arr_st sensors_array = {0};
-static data_format_t sensors_data_format = FORMAT_STRING;
+static sensors_arr_st sensors_array = {
+    .sensors = NULL,
+    .quantity = 0,
+    .data_format = FORMAT_STRING,
+    .min_period_ms = SENSORS_MAX_PER_MS
+};
 
-static uint16_t min_sensor_period_ms = 2000;
 
 static inline void sensors_array_init(uint16_t quantity, 
         int64_t def_timeout, int16_t (*get_val_func)() )
@@ -106,12 +111,12 @@ static void sensors_change_period(uint16_t sensor_idx, uint16_t period)
 
     sensors_array.sensors[sensor_idx].period_ms = period;
 
-    min_sensor_period_ms = SENSORS_MAX_PER_MS;
+    sensors_array.min_period_ms = SENSORS_MAX_PER_MS;
     for(sensor_st *sensor = sensors_array.sensors; 
             sensor < (sensors_array.sensors + sensors_array.quantity); sensor++)
     {
-        if(sensor->period_ms < min_sensor_period_ms)
-            min_sensor_period_ms = sensor->period_ms;
+        if(sensor->period_ms < sensors_array.min_period_ms)
+            sensors_array.min_period_ms = sensor->period_ms;
     }
 
     LOG_INF("Changed sensor %d period to %d ms\r\n", sensor_idx, period);
@@ -186,7 +191,7 @@ void sensors_data_update_task(void)
         }
         sensor_idx++;
     }
-    k_sleep(K_MSEC(min_sensor_period_ms / 2));
+    k_sleep(K_MSEC(sensors_array.min_period_ms / 2));
     k_cpu_idle();
 }
 
@@ -204,7 +209,7 @@ void sensors_handle_cmd_task(void)
                 sensors_change_quantity(cmd_buff.idx);
                 break;
             case CMD_READ:
-                switch(sensors_data_format)
+                switch(sensors_array.data_format)
                 {
                     case FORMAT_STRING:
                         sensors_send_string_packet();
@@ -217,9 +222,9 @@ void sensors_handle_cmd_task(void)
                 }
                 break;
             case CMD_TOGGLE:
-                sensors_data_format++;
-                sensors_data_format %= FORMATS_QTY;
-                switch(sensors_data_format)
+                sensors_array.data_format++;
+                sensors_array.data_format %= FORMATS_QTY;
+                switch(sensors_array.data_format)
                 {
                     case FORMAT_STRING:
                         LOG_INF("Format toggled to string!");
